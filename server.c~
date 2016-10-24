@@ -1,0 +1,465 @@
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
+#include <sys/time.h>
+#include <unistd.h>
+
+#include<wiringPi.h>
+
+#define PinNumber 4
+
+#define DEBUG1
+
+#define DefaultTrackCount	1278
+
+#define SMOOTHING
+
+#define MAXCLIENTS	10
+
+#define FILTERRATE	0
+
+#define SIMULATION
+
+
+
+#define SERVER_STATUS_RESET_MODE	0
+#define SERVER_STATUS_LOAD_MODE		1
+#define SERVER_STATUS_RUN_MODE		2
+
+FILE *TimeLogger;
+int TimeLoggerPoints[3000],TimeLoggerCount;
+int TrackCount=DefaultTrackCount,CycleCount,MTPC[3][40],MultiPointCount,JumpCount=0;
+int TimeLogPoints[3000],TimeLogCount,TimeSum;
+float Distances[3000];
+int EdgeCount=0;
+
+int CurrentStatus=SERVER_STATUS_RESET_MODE,ClientsReady=0,ConnectedClients=0;
+
+int iterator1,iterator2,iterator3;
+
+float distance,distancex1=0,distancex2;
+
+struct ClientStatus{
+	int IsConnected;
+	pthread_t ThreadId;
+	int ClientSocketFileDiscriptor,ClientLength;
+	struct sockaddr_in ClientAddress;
+	char Buffer[256];
+};
+
+void error(char *msg)
+{
+	printf(msg);
+//	exit(1);
+}
+
+float GetMTPCLoc(int count)
+{
+	int i;
+	float dist,increment;
+	for(i=MultiPointCount-1;i>-1;i--)
+	{
+		if(count>=MTPC[0][i])
+		{
+			dist=MTPC[1][i];
+			TimeSum=0;
+			for(iterator2=MTPC[0][i];iterator2<=count;iterator2++)
+			{
+				TimeSum+=TimeLogPoints[iterator2];
+			}
+//			increment=((float)(MTPC[1][i+1]-MTPC[1][i]))/((float)(MTPC[0][i+1]-MTPC[0][i]));
+			dist+=(((float)(MTPC[1][i+1]-MTPC[1][i]))*((float)TimeSum))/((float)(MTPC[2][i]));
+//			dist+=(increment*((float)(count-MTPC[0][i])));
+			return dist;	
+		}
+	}
+}
+
+void SensorStateChanged(void)
+{	
+	if(EdgeCount>=MTPC[0][MultiPointCount])
+	{
+		EdgeCount=-1;
+	}
+	TimeLoggerPoints[++EdgeCount]=millis();
+	distance=distancex1;
+	distancex1=Distances[EdgeCount+1];
+}
+
+
+
+int main(int argc, char *argv[])
+{
+	struct ClientStatus st;
+
+	FILE *TimeLog,*MTPCFile;
+
+	int ServerSocketFileDiscriptor,PortNumber=1234,ClientCount=0,TranssferCount;
+	struct sockaddr_in ServerAddress;
+	struct timeval tv;
+	struct ClientStatus Clients[MAXCLIENTS+1];
+	fd_set ReadFileDiscriptors,ExceptFileDiscriptors;
+	char InputDataBuffer[256],OutputDataBuffer[256];
+	long TransferHelper;
+	
+	int PreviousTransmitTime;
+
+#ifdef SIMULATION
+	FILE *Simulation;
+	int NextSimulatedTriggerPoint,SimulationStartTime,SimulationPoints[3000],SimulatedPointCount,SimulatedPointLoc;
+#endif
+
+#ifdef DEBUG
+	printf("Starting Program\n");
+#endif
+	if(argc >= 2)
+	{
+		PortNumber=atoi(argv[1]);
+	}
+
+#ifdef DEBUG
+	printf("Port number set to %d\n",PortNumber);
+#endif
+	if(stat("mtpc.txt",&st) !=0)
+	{
+		printf("MTPC file not present\n");
+		return 1;
+	}
+#ifdef DEBUG
+	printf("Mtpc File Found\n");
+#endif
+	if(stat("timelog.txt",&st) !=0)
+	{
+		printf("timelog file not present\n");
+		return 1;
+	}
+	TimeLog=fopen("timelog.txt","r");
+	fscanf(TimeLog,"%d\n",&TimeLogCount);
+#ifdef DEBUG
+	printf("TimeLog Count %d\n",TimeLogCount);	
+#endif
+	for(iterator1=0;iterator1<TimeLogCount;iterator1++)
+	{
+		fscanf(TimeLog,"%d\n",&(TimeLogPoints[iterator1]));
+	}
+	fclose(TimeLog);
+/* Loading MTPC points	*/
+	MTPCFile=fopen("mtpc.txt","r");
+	fscanf(MTPCFile,"%d\n",&MultiPointCount);
+	if(MultiPointCount<2)
+	{
+		printf("Not enough calibration points\n");
+		fclose(MTPCFile);
+		return 1;
+	}
+#ifdef DEBUG
+	printf("Number of MTPC points is %d\n",MultiPointCount);
+#endif
+	for(iterator1=0;iterator1<MultiPointCount;iterator1++)
+	{
+		fscanf(MTPCFile,"%d,%d\n",&(MTPC[0][iterator1]),&(MTPC[1][iterator1]));
+		
+	}
+
+	for(iterator1=0;iterator1<MultiPointCount;iterator1++)
+	{
+		TimeSum=0;
+		for(iterator2=MTPC[0][iterator1];iterator2<MTPC[0][iterator1+1];iterator2++)
+		{
+			TimeSum+=TimeLogPoints[iterator2];
+		}
+		MTPC[2][iterator1]=TimeSum;
+#ifdef DEBUG
+		printf("Scanned MTPC location %d, count=%d, distance=%d, timesum=%d\n",iterator1,MTPC[0][iterator1],MTPC[1][iterator1],MTPC[2][iterator1]);
+#endif
+	}
+	fclose(MTPCFile);
+	for(iterator1=0;iterator1<TimeLogCount;iterator1++)
+	{
+		Distances[iterator1]=GetMTPCLoc(iterator1);
+	}
+
+#ifdef DEBUG
+	printf("mtpc values loaded\n");
+#endif
+	if(wiringPiSetup()==-1)
+	{
+		printf("Wiring Pi did not load\n");
+		return 1;
+	}
+#ifdef DEBUG
+	printf("Wiring pi is setup\n");
+#endif
+#ifndef SIMULATION
+	pinMode(PinNumber,INPUT);
+	if(wiringPiISR(PinNumber,INT_EDGE_BOTH, &myInterruptLeading) <0)
+	{
+		fprintf(stderr,"unable to setup ISR for leading pin :%s\n",strerror(errno));
+		return 1;
+	}
+#ifdef DEBUG
+	printf("Pin %d set in input mode and interrupt enables\n",PinNumber);
+#endif
+#else
+	if(stat("simulate.txt",&st) !=0)
+	{
+		printf("Simulate file not present\n");
+		return 1;
+	}
+#ifdef DEBUG
+	printf("simulate file found\n");
+#endif
+	Simulation=fopen("simulate.txt","r");
+	fscanf(Simulation,"%d\n",&SimulatedPointCount);
+	for(iterator1=0;iterator1<SimulatedPointCount;iterator1++)	
+	{
+		fscanf(Simulation,"%d\n",&(SimulationPoints[iterator1]));
+	}
+	NextSimulatedTriggerPoint=SimulationPoints[0];
+	SimulatedPointLoc=1;
+	EdgeCount=-1;
+	fclose(Simulation);
+#ifdef DEBUG
+	printf("%d loaded as Next Simulation Trigger Point\n",NextSimulatedTriggerPoint);
+#endif
+#endif
+	for(ClientCount=0;ClientCount<MAXCLIENTS+1;ClientCount++)
+	{
+		Clients[ClientCount].IsConnected=0;
+	}
+
+	ServerSocketFileDiscriptor = socket(AF_INET, SOCK_STREAM, 0);
+	if (ServerSocketFileDiscriptor < 0)
+	{
+		printf("Error opening Socket\n");
+		return 1;
+	}
+
+	bzero((char *) &ServerAddress, sizeof(ServerAddress));
+	ServerAddress.sin_family = AF_INET;
+	ServerAddress.sin_port=htons(PortNumber);
+	ServerAddress.sin_addr.s_addr = INADDR_ANY;
+
+	if(bind(ServerSocketFileDiscriptor, (struct sockaddr *) &ServerAddress,sizeof(ServerAddress))<0)
+	{
+		error("Error on binding\n");
+		return 1;
+	}
+
+
+	listen(ServerSocketFileDiscriptor,5);
+/* This is where you stopped on 29th */
+	PreviousTransmitTime=millis();
+	SimulationStartTime=PreviousTransmitTime;
+	while(1)
+	{
+		int maxid;
+		long currentTime=millis();
+#ifdef SIMULATION
+		if((currentTime-SimulationStartTime)>=NextSimulatedTriggerPoint)
+		{
+			SensorStateChanged();
+			NextSimulatedTriggerPoint=SimulationPoints[SimulatedPointLoc++];
+#ifdef DEBUG
+	printf("Trigger Point %d, edge count %d, Distance %f, TimeLogPoint %d, TimeLoggerPoint %d, JumpCount %d\n", NextSimulatedTriggerPoint, EdgeCount, distance,TimeLogPoints[EdgeCount],TimeLoggerPoints[EdgeCount],JumpCount);
+			JumpCount=0;
+#endif
+		}
+#endif
+		tv.tv_sec=0;
+		tv.tv_usec=100;
+		FD_ZERO(&ReadFileDiscriptors);
+		FD_ZERO(&ExceptFileDiscriptors);
+		FD_SET(0, &ReadFileDiscriptors);
+		FD_SET(ServerSocketFileDiscriptor, &ReadFileDiscriptors);
+		FD_SET(ServerSocketFileDiscriptor, &ExceptFileDiscriptors);
+		maxid=ServerSocketFileDiscriptor;
+		if((currentTime-PreviousTransmitTime)>10)
+		{
+			PreviousTransmitTime=currentTime;
+			bzero(OutputDataBuffer,256);
+#ifdef SMOOTHING
+			if(EdgeCount>-1)
+			{
+				float dist,increment;
+// you stopped here for lunch		
+				dist=distance;
+				dist+=(((float)(millis()-TimeLoggerPoints[EdgeCount]))*((float)(distancex1-distance)))/((float)(TimeLogPoints[EdgeCount]));
+				if(dist<=distancex1)
+				{
+					TransferHelper=dist;
+				}
+				else
+				{
+#ifdef DEBUG
+					JumpCount++;
+#endif
+					TransferHelper=distancex1;
+
+				}
+				if(dist==distance)
+					JumpCount++;
+			}else
+			{
+				TransferHelper=distance;
+			}
+#else
+			TransferHelper=distance;
+#endif
+			if(CurrentStatus==SERVER_STATUS_RESET_MODE)
+			{
+				TransferHelper=-2;
+			}else if(CurrentStatus==SERVER_STATUS_LOAD_MODE)
+			{
+				TransferHelper=-1;
+			}
+
+#ifdef SEND_SPEED
+			sprintf(OutputDataBuffer,"%f %f\n",distance,speed);
+#else
+			sprintf(OutputDataBuffer,"%ld\n",TransferHelper);
+#endif
+			for(ClientCount=0;ClientCount<10;ClientCount++)
+			{
+				if(Clients[ClientCount].IsConnected==1)
+				{
+					FD_SET(Clients[ClientCount].ClientSocketFileDiscriptor, &ReadFileDiscriptors);
+					FD_SET(Clients[ClientCount].ClientSocketFileDiscriptor, &ExceptFileDiscriptors);
+					if(Clients[ClientCount].ClientSocketFileDiscriptor>maxid)
+					{
+						maxid=Clients[ClientCount].ClientSocketFileDiscriptor;
+					}
+				}
+			}
+			select(maxid+1,&ReadFileDiscriptors,NULL,&ExceptFileDiscriptors,&tv);
+			if(FD_ISSET(0,&ReadFileDiscriptors))
+			{
+				char datac;
+				scanf("%c",&datac);
+				if(datac=='S')
+				{
+					printf("Closing Server\n");
+					for(ClientCount=0;ClientCount<MAXCLIENTS;ClientCount++)
+					{
+						if(Clients[ClientCount].IsConnected==1)
+						{
+							close(Clients[ClientCount].ClientSocketFileDiscriptor);
+						}
+					}
+					close(ServerSocketFileDiscriptor);
+					return 0;
+				}else if(datac=='R')
+				{
+					EdgeCount=0;
+					distance=0;
+					printf("Resetting count and distance\n");
+				}else if(datac=='I')
+				{
+					printf("Count=%ld,distance=%f\n",EdgeCount,distance);
+				}
+			}
+			if(FD_ISSET(ServerSocketFileDiscriptor,&ReadFileDiscriptors))
+			{
+				
+//				printf("accepting Connection\n");
+				for(ClientCount=0;ClientCount<MAXCLIENTS+1;ClientCount++)
+				{
+					if(Clients[ClientCount].IsConnected==0)
+					{
+						break;
+					}else
+					{
+//						printf("Client point %d is busy %d\n",ClientCount,Clients[ClientCount].IsConnected);
+					}
+				}
+	
+				printf("Accepting Client on %d\n",ClientCount);
+				ConnectedClients++;
+				Clients[ClientCount].ClientLength = sizeof(Clients[ClientCount].ClientAddress);
+				Clients[ClientCount].ClientSocketFileDiscriptor = accept(ServerSocketFileDiscriptor, (struct sockaddr *) &(Clients[ClientCount].ClientAddress),&(Clients[ClientCount].ClientLength));
+				if(Clients[ClientCount].ClientSocketFileDiscriptor < 0)
+				{
+					printf("ERROR on accept\n");
+				}else
+				{
+					if(ClientCount!=MAXCLIENTS)
+					{
+						Clients[ClientCount].IsConnected=1;
+					}else
+					{			
+						printf("cannot Accomodate any more clients\n");
+						close(Clients[ClientCount].ClientSocketFileDiscriptor);
+					}
+				}
+			}
+			
+			for(ClientCount=0;ClientCount<MAXCLIENTS;ClientCount++)
+			{	
+				if((Clients[ClientCount].IsConnected==1)&&(FD_ISSET(Clients[ClientCount].ClientSocketFileDiscriptor,&ExceptFileDiscriptors)))
+				{
+//					printf("Client Closed Connection on Client number %d\n",ClientCount);
+					close(Clients[ClientCount].ClientSocketFileDiscriptor);
+					Clients[ClientCount].IsConnected==0;
+						ConnectedClients--;
+				}
+				if((Clients[ClientCount].IsConnected==1)&&(FD_ISSET(Clients[ClientCount].ClientSocketFileDiscriptor,&ReadFileDiscriptors)))
+				{
+					int errorsoc = 0;
+					char datac;
+					socklen_t len = sizeof (errorsoc);
+					int retval = getsockopt (Clients[ClientCount].ClientSocketFileDiscriptor
+							, SOL_SOCKET
+							, SO_ERROR
+							, &errorsoc
+							, &len);
+					if((retval!=0)||(errorsoc!=0))
+					{
+						printf("Client Closed Connection on Client number %d\n",ClientCount);
+						close(Clients[ClientCount].ClientSocketFileDiscriptor);
+						Clients[ClientCount].IsConnected=0;
+						ConnectedClients--;
+						continue;
+					}
+					bzero(InputDataBuffer,256);
+					TranssferCount=read(Clients[ClientCount].ClientSocketFileDiscriptor,InputDataBuffer,255);
+					if ( TranssferCount < 1 )
+					{
+						printf("Client Closed Connection on Client number %d\n",ClientCount);
+						close(Clients[ClientCount].ClientSocketFileDiscriptor);
+						Clients[ClientCount].IsConnected=0;
+						ConnectedClients--;
+						continue;
+//						printf("ERROR reading from socket\n");
+					}
+					sscanf(InputDataBuffer,"%c",&datac);
+					if((CurrentStatus==SERVER_STATUS_RESET_MODE)&&(datac=='E'))
+					{
+						CurrentStatus=SERVER_STATUS_LOAD_MODE;
+						ClientsReady=1;
+					}if((CurrentStatus==SERVER_STATUS_LOAD_MODE)&&(datac=='r'))
+					{
+						ClientsReady++;
+						if(ClientsReady>=ConnectedClients)
+							CurrentStatus=SERVER_STATUS_RUN_MODE;
+					}if((CurrentStatus==SERVER_STATUS_RUN_MODE)&&(datac=='R'))
+					{
+						CurrentStatus=SERVER_STATUS_RESET_MODE;
+					}
+					printf("Here is the message received from cleint %d : %s\n",ClientCount,InputDataBuffer);
+					
+				}
+				if((Clients[ClientCount].IsConnected==1))//&&(FD_ISSET(Clients[ClientCount].ClientSocketFileDiscriptor,&writefds)))
+				{
+					TranssferCount = write(Clients[ClientCount].ClientSocketFileDiscriptor, OutputDataBuffer,strlen(OutputDataBuffer));
+					if(TranssferCount<0)
+					{
+						error("ERROR writing to socket\n");
+					}
+				}
+			}
+		}
+	}
+	return 0;
+}

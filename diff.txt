@@ -1,0 +1,40 @@
+164c164
+<     GoldRushIncrement = 100000.0 / (float) GoldRushTrackCount;
+---
+>     GoldRushIncrement = 840000.0 / (float) GoldRushTrackCount;
+167c167
+< void StoreTrackCount() {/*
+---
+> void StoreTrackCount() {
+181c181
+<     }*/
+---
+>     }
+256c256
+<         sprintf(Command,"gpio mode %d down",INPUTPIN1);
+---
+>         sprintf(Command,"gpio mode %d up",INPUTPIN1);
+258c258
+<         sprintf(Command,"gpio mode %d down",INPUTPIN2);
+---
+>         sprintf(Command,"gpio mode %d up",INPUTPIN2);
+260c260
+<         sprintf(Command,"gpio mode %d down",INPUTPIN3);
+---
+>         sprintf(Command,"gpio mode %d up",INPUTPIN3);
+262c262
+<         sprintf(Command,"gpio mode %d down",INPUTPIN4);
+---
+>         sprintf(Command,"gpio mode %d up",INPUTPIN4);
+271c271
+<         }/*
+---
+>         }
+283c283
+<         }*/
+---
+>         }
+459c459
+<                     if (distance >= 100000) {
+---
+>                     if (distance >= 840000) {
