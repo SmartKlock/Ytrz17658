@@ -4,6 +4,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <stdlib.h>
 
 #include <sys/time.h>
 #include <unistd.h>
@@ -637,7 +638,7 @@ int main(int argc, char *argv[]) {
 
         bzero(OutputDataBuffer, 256);
         sprintf(OutputDataBuffer, "%d\n", (int) distance);
-        sprintf(ConnectedAddresses, " ");
+        sprintf(ConnectedAddresses, "");
         for (ClientCount = 0; ClientCount < MAXCLIENTS; ClientCount++) {
             if (Clients[ClientCount].IsConnected == 1) {
                 FD_SET(Clients[ClientCount].ClientSocketFileDiscriptor, &ReadFileDiscriptors);
@@ -646,7 +647,7 @@ int main(int argc, char *argv[]) {
                     MaximumFileDiscriptorID = Clients[ClientCount].ClientSocketFileDiscriptor;
                 }
                 if (Clients[ClientCount].DenyInput == 0) {
-                    sprintf(ConnectedAddresses, "%sIP=%d:%d:%d:%d Battery=%f Temperature=%f Status=%d Proximity=%d\n ", ConnectedAddresses, Clients[ClientCount].ClientIP[0], Clients[ClientCount].ClientIP[1], Clients[ClientCount].ClientIP[2], Clients[ClientCount].ClientIP[3],, Clients[ClientCount].Battery_Percentage, Clients[ClientCount].Temperature, Clients[ClientCount].Status, Clients[ClientCount].Proximity);
+                    sprintf(ConnectedAddresses, "%sIP=%d:%d:%d:%d B=%.02f T=%.02f S=%d P=%d\n", ConnectedAddresses, Clients[ClientCount].ClientIP[0], Clients[ClientCount].ClientIP[1], Clients[ClientCount].ClientIP[2], Clients[ClientCount].ClientIP[3], Clients[ClientCount].Battery_Percentage, Clients[ClientCount].Temperature, Clients[ClientCount].Status, Clients[ClientCount].Proximity);
                     connectedVR++;
                 }
             }
@@ -963,7 +964,7 @@ void ProcessCommand(int ClientCount)
         }
         else if(strcmp(Command,APP_COMMAND_STRING_GET_CONNECTED_CLIENTS)==0)
         {
-            sprintf(Clients[ClientCount].Response, "%d Clients Connected with IP's%s\n", connectedVR, ConnectedAddresses);
+            sprintf(Clients[ClientCount].Response, "%d\n%s", connectedVR, ConnectedAddresses);
         }
         else if(strcmp(Command,APP_COMMAND_STRING_CALIBRATE_READING)==0)
         {
@@ -1002,30 +1003,34 @@ void ProcessCommand(int ClientCount)
         {
             if (i <= strlen(Clients[ClientCount].Command)) {
                 sscanf(Clients[ClientCount].Command + i, "%s", Parameters[0]);
-                sscanf(Parameters[0],"%f",Clients[ClientCount].Battery_Percentage);
+                sscanf(Parameters[0],"%f",&(Clients[ClientCount].Battery_Percentage));
                 i += strlen(Parameters[0]) + 1;
             }
+            sprintf(Clients[ClientCount].Response,"");
         }else if(strcmp(Command,APP_COMMAND_STRING_STORE_TEMPERATURE)==0)
         {
             if (i <= strlen(Clients[ClientCount].Command)) {
                 sscanf(Clients[ClientCount].Command + i, "%s", Parameters[0]);
-                sscanf(Parameters[0],"%f",Clients[ClientCount].Temperature);
+                sscanf(Parameters[0],"%f",&(Clients[ClientCount].Temperature));
                 i += strlen(Parameters[0]) + 1;
             }
+            sprintf(Clients[ClientCount].Response,"");
         }else if(strcmp(Command,APP_COMMAND_STRING_STORE_PROXIMITY)==0)
         {
             if (i <= strlen(Clients[ClientCount].Command)) {
                 sscanf(Clients[ClientCount].Command + i, "%s", Parameters[0]);
-                sscanf(Parameters[0],"%d",Clients[ClientCount].Proximity);
+                sscanf(Parameters[0],"%d",&(Clients[ClientCount].Proximity));
                 i += strlen(Parameters[0]) + 1;
             }
+            sprintf(Clients[ClientCount].Response,"");
         }else if(strcmp(Command,APP_COMMAND_STRING_STORE_STATUS)==0)
         {
             if (i <= strlen(Clients[ClientCount].Command)) {
                 sscanf(Clients[ClientCount].Command + i, "%s", Parameters[0]);
-                sscanf(Parameters[0],"%d",Clients[ClientCount].Status);
+                sscanf(Parameters[0],"%d",&(Clients[ClientCount].Status));
                 i += strlen(Parameters[0]) + 1;
             }
+            sprintf(Clients[ClientCount].Response,"");
         }
         Clients[ClientCount].Response+=strlen(Clients[ClientCount].Response);
     }
