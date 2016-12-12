@@ -22,7 +22,7 @@
 
 #include <unistd.h>
 #define DEBUG_MODE
-#define MAXCLIENTS  20
+#define MAXCLIENTS  40
 
 #define INPUTPIN1   0
 #define INPUTPIN2   1
@@ -85,6 +85,7 @@
 #define APP_COMMAND_STRING_GET_STATUS                 "SETTING"
 #define APP_COMMAND_STRING_GET_LOCATION               "LOCATION"
 #define APP_COMMAND_STRING_GET_CONNECTED_CLIENTS      "CLIENTS"
+#define APP_COMMAND_STRING_GET_SENSOR                  "SENSOR"
 #define APP_COMMAND_STRING_RESET_EXPERIENCE           "RESET"
 #define APP_COMMAND_STRING_START_EXPERIENCE           "START"
 #define APP_COMMAND_STRING_DISABLE_MEASUREMENT        "DBM"
@@ -94,6 +95,8 @@
 #define APP_COMMAND_STRING_STORE_TEMPERATURE          "TEMPERATURE"
 #define APP_COMMAND_STRING_STORE_PROXIMITY            "PROXIMITY"
 #define APP_COMMAND_STRING_STORE_STATUS               "STATUS"
+#define APP_COMMAND_STRING_STORE_NAME                 "NAME"
+#define APP_COMMAND_STRING_GET_LOG                    "LOG"
 
 struct ClientStatus {
     int IsConnected;
@@ -102,8 +105,8 @@ struct ClientStatus {
     struct sockaddr_in ClientAddress;
     int ClientIP[4], ResponseAvailable, DenyInput;
     float Temperature, Battery_Percentage;
-    int Proximity, Status;
-    char *Response,ResponseBuffer[2000], Command[200];
+    int Proximity, Status, WriteBlocked;
+    char *Response, ResponseBuffer[2000], Command[200], Name[50];
 };
 
 int Server_Status = SERVER_STATUS_CODE_INIT;
@@ -140,7 +143,7 @@ struct sockaddr_in ServerAddress;
 struct timeval Timer_Variable;
 struct itimerval ServerTimer, InputTimer;
 struct ClientStatus Clients[MAXCLIENTS + 1], FileCheckStruct;
-fd_set ReadFileDiscriptors, ExceptFileDiscriptors;
+fd_set ReadFileDiscriptors, ExceptFileDiscriptors, WriteFileDiscriptors;
 char InputDataBuffer[256], OutputDataBuffer[256], Address[20], ConnectedAddresses[500];
 
 int stopeverything = 0, servercount = 0, inputcount = 0, connectedVR = 0;
@@ -333,7 +336,7 @@ int ReadSimValues(char *path, int *SimValues) {
 int main(int argc, char *argv[]) {
     char InputString[600];
     int iterator;
-    delay(3000);
+    delay(10000);
     Server_Status = SERVER_STATUS_CODE_RUNNING_SIM_SG_RESET;
 
     for (iterator = 1; iterator < argc; iterator++) {
@@ -384,11 +387,11 @@ int main(int argc, char *argv[]) {
     for (ClientCount = 0; ClientCount < MAXCLIENTS + 1; ClientCount++) {
         Clients[ClientCount].IsConnected = 0;
         Clients[ClientCount].DenyInput = 0;
-        Clients[ClientCount].Battery_Percentage=0;
-        Clients[ClientCount].Temperature=0;
-        Clients[ClientCount].Proximity=0;
-        Clients[ClientCount].Status=0;
-        sprintf(Clients[ClientCount].Command,"AT");
+        Clients[ClientCount].Battery_Percentage = 0;
+        Clients[ClientCount].Temperature = 0;
+        Clients[ClientCount].Proximity = 0;
+        Clients[ClientCount].Status = 0;
+        sprintf(Clients[ClientCount].Command, "AT");
     }
     printspecial(0, "Starting Simulation\n");
 
@@ -398,20 +401,21 @@ int main(int argc, char *argv[]) {
     pipe(InputPipe);
     pipe(ServerPipe);
     InputThreadProcessId = fork();
+
+    if (wiringPiSetup() == -1) {
+        printspecial(0, "Wiring Pi did not load\n");
+        return 1;
+    }
+    pinMode(INPUTPIN1, INPUT);
+    pinMode(INPUTPIN2, INPUT);
+    pinMode(INPUTPIN3, INPUT);
+    pinMode(INPUTPIN4, INPUT);
     if (InputThreadProcessId == 0) {
         int CurrentTime, sucks = 0;
         char Command[50];
         close(InputPipe[1]);
         close(ServerPipe[0]);
 
-        if (wiringPiSetup() == -1) {
-            printspecial(0, "Wiring Pi did not load\n");
-            return 1;
-        }
-        pinMode(INPUTPIN1, INPUT);
-        pinMode(INPUTPIN2, INPUT);
-        pinMode(INPUTPIN3, INPUT);
-        pinMode(INPUTPIN4, INPUT);
         sprintf(Command, "gpio mode %d down", INPUTPIN1);
         system(Command);
         sprintf(Command, "gpio mode %d down", INPUTPIN2);
@@ -631,6 +635,7 @@ int main(int argc, char *argv[]) {
         Timer_Variable.tv_usec = 40000;
         FD_ZERO(&ReadFileDiscriptors);
         FD_ZERO(&ExceptFileDiscriptors);
+        FD_ZERO(&ExceptFileDiscriptors);
         //        FD_SET(0, &ReadFileDiscriptors);
         FD_SET(ServerSocketFileDiscriptor, &ReadFileDiscriptors);
         FD_SET(ServerSocketFileDiscriptor, &ExceptFileDiscriptors);
@@ -642,17 +647,18 @@ int main(int argc, char *argv[]) {
         for (ClientCount = 0; ClientCount < MAXCLIENTS; ClientCount++) {
             if (Clients[ClientCount].IsConnected == 1) {
                 FD_SET(Clients[ClientCount].ClientSocketFileDiscriptor, &ReadFileDiscriptors);
+                FD_SET(Clients[ClientCount].ClientSocketFileDiscriptor, &WriteFileDiscriptors);
                 FD_SET(Clients[ClientCount].ClientSocketFileDiscriptor, &ExceptFileDiscriptors);
                 if (Clients[ClientCount].ClientSocketFileDiscriptor > MaximumFileDiscriptorID) {
                     MaximumFileDiscriptorID = Clients[ClientCount].ClientSocketFileDiscriptor;
                 }
                 if (Clients[ClientCount].DenyInput == 0) {
-                    sprintf(ConnectedAddresses, "%sIP=%d:%d:%d:%d B=%.02f T=%.02f S=%d P=%d\n", ConnectedAddresses, Clients[ClientCount].ClientIP[0], Clients[ClientCount].ClientIP[1], Clients[ClientCount].ClientIP[2], Clients[ClientCount].ClientIP[3], Clients[ClientCount].Battery_Percentage, Clients[ClientCount].Temperature, Clients[ClientCount].Status, Clients[ClientCount].Proximity);
+                    sprintf(ConnectedAddresses, "%sIP=%d:%d:%d:%d B=%.02f T=%.02f S=%d P=%d N=%s\n", ConnectedAddresses, Clients[ClientCount].ClientIP[0], Clients[ClientCount].ClientIP[1], Clients[ClientCount].ClientIP[2], Clients[ClientCount].ClientIP[3], Clients[ClientCount].Battery_Percentage, Clients[ClientCount].Temperature, Clients[ClientCount].Status, Clients[ClientCount].Proximity, Clients[ClientCount].Name);
                     connectedVR++;
                 }
             }
         }
-        select(MaximumFileDiscriptorID + 1, &ReadFileDiscriptors, NULL, &ExceptFileDiscriptors, &Timer_Variable);
+        select(MaximumFileDiscriptorID + 1, &ReadFileDiscriptors, &WriteFileDiscriptors, &ExceptFileDiscriptors, &Timer_Variable);
 
         if (FD_ISSET(0, &ReadFileDiscriptors)) {
             char datac[60];
@@ -688,12 +694,22 @@ int main(int argc, char *argv[]) {
                     Clients[ClientCount].ClientIP[1],
                     Clients[ClientCount].ClientIP[2],
                     Clients[ClientCount].ClientIP[3]);
+            sprintf(Clients[ClientCount].Name, "");
+            sprintf(Clients[ClientCount].Command, "");
+            sprintf(Clients[ClientCount].ResponseBuffer, "");
+            Clients[ClientCount].Battery_Percentage = 0;
+            Clients[ClientCount].Temperature = 0;
+            Clients[ClientCount].Status = 0;
+            Clients[ClientCount].Proximity = 0;
+            Clients[ClientCount].ResponseAvailable = 0;
             Clients[ClientCount].DenyInput = 0;
+
             if (Clients[ClientCount].ClientSocketFileDiscriptor < 0) {
                 printspecial(0, "ERROR on accept\n");
             } else {
                 if (ClientCount != MAXCLIENTS) {
                     Clients[ClientCount].IsConnected = 1;
+                    Clients[ClientCount].WriteBlocked = 0;
 
                 } else {
                     printspecial(0, "cannot Accomodate any more clients\n");
@@ -709,7 +725,7 @@ int main(int argc, char *argv[]) {
             if (FD_ISSET(Clients[ClientCount].ClientSocketFileDiscriptor, &ExceptFileDiscriptors)) {
                 printspecial(0, "Client Closed Connection on Client number %d\n", ClientCount);
                 close(Clients[ClientCount].ClientSocketFileDiscriptor);
-                Clients[ClientCount].IsConnected == 0;
+                Clients[ClientCount].IsConnected = 0;
                 ConnectedClients--;
                 continue;
             }
@@ -746,11 +762,25 @@ int main(int argc, char *argv[]) {
                     sprintf(InputString, "%s-(%d)%s", InputString, ClientCount, InputDataBuffer);
                     inputid = ClientCount;
                 }
-#endif
-                printspecial(0, "Message received from ip %d with client id %d : %s\n", Clients[ClientCount].ClientIP[3], ClientCount, InputDataBuffer);
+#endif      
+                if (Clients[ClientCount].DenyInput == 0) {
+                    printspecial(0, "Message received from ip %d with client id %d : %s\n", Clients[ClientCount].ClientIP[3], ClientCount, InputDataBuffer);
+                }
 
             }
-
+            if (!FD_ISSET(Clients[ClientCount].ClientSocketFileDiscriptor, &WriteFileDiscriptors)) {
+                if (Clients[ClientCount].WriteBlocked < 50) {
+                    Clients[ClientCount].WriteBlocked++;
+                } else {
+                    printspecial(0, "Client Closed Connection on Client number %d\n", ClientCount);
+                    close(Clients[ClientCount].ClientSocketFileDiscriptor);
+                    Clients[ClientCount].IsConnected = 0;
+                    ConnectedClients--;
+                    continue;
+                }
+            } else {
+                Clients[ClientCount].WriteBlocked = 0;
+            }
             int time1, time2;
             char OutData[500];
             bzero(OutData, 500);
@@ -767,40 +797,35 @@ int main(int argc, char *argv[]) {
             if ((time2 - time1) > SIMULATION_DECIMATION_TIME) {
                 printspecial(1, "Data writing took too much time\n");
             }
-            if (TranssferCount < 0) {
+            if ((TranssferCount < strlen(OutData))) {
                 printspecial(0, "Error writing to client %d\n", ClientCount);
             }
         }
-//        if (inputid == -2) {
-//            continue;
-//        }
-        for(ClientCount=0;ClientCount<MAXCLIENTS;ClientCount++)
-        {   
-            if(strcmp(Clients[ClientCount].Command,"AT")!=0)
-            {
+        //        if (inputid == -2) {
+        //            continue;
+        //        }
+        for (ClientCount = 0; ClientCount < MAXCLIENTS; ClientCount++) {
+            if (strcmp(Clients[ClientCount].Command, "AT") != 0) {
                 ProcessCommand(ClientCount);
-                sprintf(Clients[ClientCount].Command,"AT");
+                sprintf(Clients[ClientCount].Command, "AT");
             }
         }
-//        ProcessCommand(InputString);
+        //        ProcessCommand(InputString);
     }
 
 }
 
-void ProcessCommand(int ClientCount)
-{
-    int i=0;
-    char Command[50],Parameters[2][50];
-    Clients[ClientCount].ResponseAvailable=1;
-    Clients[ClientCount].Response=Clients[ClientCount].ResponseBuffer;
-    while(i<strlen(Clients[ClientCount].Command))
-    {
-        sprintf(Clients[ClientCount].Response,"Please Clarify\n");
-        sscanf(Clients[ClientCount].Command+i,"%s",Command);
-        i+=strlen(Command)+1;
-        if(strcmp(Command,APP_COMMAND_STRING_STOP_SERVER)==0)
-        {
-            write(Clients[ClientCount].ClientSocketFileDiscriptor, "Stopping Server\n",strlen("Stopping Server\n"));
+void ProcessCommand(int ClientCount) {
+    int i = 0;
+    char Command[50], Parameters[2][50];
+    Clients[ClientCount].ResponseAvailable = 1;
+    Clients[ClientCount].Response = Clients[ClientCount].ResponseBuffer;
+    while (i < strlen(Clients[ClientCount].Command)) {
+        sprintf(Clients[ClientCount].Response, "Please Clarify\n");
+        sscanf(Clients[ClientCount].Command + i, "%s", Command);
+        i += strlen(Command) + 1;
+        if (strcmp(Command, APP_COMMAND_STRING_STOP_SERVER) == 0) {
+            write(Clients[ClientCount].ClientSocketFileDiscriptor, "Stopping Server\n", strlen("Stopping Server\n"));
             for (ClientCount = 0; ClientCount < MAXCLIENTS; ClientCount++) {
                 if (Clients[ClientCount].IsConnected == 1) {
                     close(Clients[ClientCount].ClientSocketFileDiscriptor);
@@ -816,10 +841,8 @@ void ProcessCommand(int ClientCount)
             printspecial(0, "Shutting down the server\n");
             delay(10);
             exit(0);
-        }
-        else if(strcmp(Command,APP_COMMAND_STRING_SHUTDOWN_SERVER)==0)
-        {
-            write(Clients[ClientCount].ClientSocketFileDiscriptor, "Shutting Down The Server\n",strlen("Shutting Down The Server\n"));
+        } else if (strcmp(Command, APP_COMMAND_STRING_SHUTDOWN_SERVER) == 0) {
+            write(Clients[ClientCount].ClientSocketFileDiscriptor, "Shutting Down The Server\n", strlen("Shutting Down The Server\n"));
             for (ClientCount = 0; ClientCount < MAXCLIENTS; ClientCount++) {
                 if (Clients[ClientCount].IsConnected == 1) {
                     close(Clients[ClientCount].ClientSocketFileDiscriptor);
@@ -836,9 +859,7 @@ void ProcessCommand(int ClientCount)
             delay(10);
             system("sudo shutdown -h now");
             exit(0);
-        }
-        else if(strcmp(Command,APP_COMMAND_STRING_RESET_EXPERIENCE)==0)
-        {
+        } else if (strcmp(Command, APP_COMMAND_STRING_RESET_EXPERIENCE) == 0) {
             if (i <= strlen(Clients[ClientCount].Command)) {
                 sscanf(Clients[ClientCount].Command + i, "%s", Parameters[0]);
                 i += strlen(Parameters[0]) + 1;
@@ -847,44 +868,42 @@ void ProcessCommand(int ClientCount)
                     i += strlen(Parameters[1]) + 1;
                 }
             }
-            if (strcmp(Parameters[0], "SIM")==0) {
-                if (strcmp(Parameters[1], "GR")==0) {
+            if (strcmp(Parameters[0], "SIM") == 0) {
+                if (strcmp(Parameters[1], "GR") == 0) {
                     distance = 0;
                     Server_Status = SERVER_STATUS_CODE_RUNNING_SIM_GR_RESET;
                     sprintf(Clients[ClientCount].Response, "Resetting count and distance and running Gold rush simulation\n");
                     ResetInput();
-                } else if (strcmp(Parameters[1], "MM")==0) {
+                } else if (strcmp(Parameters[1], "MM") == 0) {
                     distance = 0;
                     Server_Status = SERVER_STATUS_CODE_RUNNING_SIM_MM_RESET;
                     sprintf(Clients[ClientCount].Response, "Resetting count and distance and running MITM simulation\n");
                     ResetInput();
-                } else if (strcmp(Parameters[1], "SG")==0) {
+                } else if (strcmp(Parameters[1], "SG") == 0) {
                     Server_Status = SERVER_STATUS_CODE_RUNNING_SIM_SG_RESET;
                     sprintf(Clients[ClientCount].Response, "Resetting count and distance and running SalinGhar simulation\n");
                     distance = -2;
                     ResetInput();
                 }
-            } else if (strcmp(Parameters[0], "RUN")==0) {
-                if (strcmp(Parameters[1], "GR")==0) {
+            } else if (strcmp(Parameters[0], "RUN") == 0) {
+                if (strcmp(Parameters[1], "GR") == 0) {
                     distance = 0;
                     Server_Status = SERVER_STATUS_CODE_RUNNING_RUN_GR_RESET;
                     sprintf(Clients[ClientCount].Response, "Resetting count and distance and running Gold rush sensor\n");
                     ResetInput();
-                } else if (strcmp(Parameters[1], "MM")==0) {
+                } else if (strcmp(Parameters[1], "MM") == 0) {
                     distance = 0;
                     Server_Status = SERVER_STATUS_CODE_RUNNING_RUN_MM_RESET;
                     sprintf(Clients[ClientCount].Response, "Resetting count and distance and running MITM sensor\n");
                     ResetInput();
-                } else if (strcmp(Parameters[1], "SG")==0) {
+                } else if (strcmp(Parameters[1], "SG") == 0) {
                     Server_Status = SERVER_STATUS_CODE_RUNNING_RUN_SG_RESET;
                     sprintf(Clients[ClientCount].Response, "Resetting count and distance and running SalimGhar sensor\n");
                     distance = -2;
                     ResetInput();
                 }
             }
-        }
-        else if(strcmp(Command,APP_COMMAND_STRING_START_EXPERIENCE)==0)
-        {
+        } else if (strcmp(Command, APP_COMMAND_STRING_START_EXPERIENCE) == 0) {
             switch (Server_Status) {
                 case SERVER_STATUS_CODE_RUNNING_SIM_GR_RESET:
                     Server_Status = SERVER_STATUS_CODE_RUNNING_SIM_GR;
@@ -895,8 +914,8 @@ void ProcessCommand(int ClientCount)
                 case SERVER_STATUS_CODE_RUNNING_SIM_SG_RESET:
                     Server_Status = SERVER_STATUS_CODE_RUNNING_SIM_SG;
                     ResetInput();
-                    OldManVideoTime=micros();
-                    OldManVideoTime+=17000000;
+                    OldManVideoTime = micros();
+                    OldManVideoTime += 17000000;
                     distance = -1;
                     sprintf(Clients[ClientCount].Response, "Started Salimghar simulation\n");
                     break;
@@ -915,8 +934,8 @@ void ProcessCommand(int ClientCount)
                 case SERVER_STATUS_CODE_RUNNING_RUN_SG_RESET:
                     Server_Status = SERVER_STATUS_CODE_RUNNING_RUN_SG;
                     ResetInput();
-                    OldManVideoTime=micros();
-                    OldManVideoTime+=17000000;
+                    OldManVideoTime = micros();
+                    OldManVideoTime += 17000000;
                     distance = -1;
                     sprintf(Clients[ClientCount].Response, "Started Salimghar sensor\n");
                     break;
@@ -927,9 +946,9 @@ void ProcessCommand(int ClientCount)
                     sprintf(Clients[ClientCount].Response, "Started MITM sensor\n");
                     break;
             }
-        }
-        else if(strcmp(Command,APP_COMMAND_STRING_GET_STATUS)==0)
-        {
+        } else if (strcmp(Command, APP_COMMAND_STRING_GET_STATUS) == 0) {
+            sprintf(Clients[ClientCount].Response, "Mode ");
+            Clients[ClientCount].Response += strlen(Clients[ClientCount].Response);
             if (Server_Status == SERVER_STATUS_CODE_RUNNING_SIM_GR) {
                 sprintf(Clients[ClientCount].Response, "SIM GR S\n");
             } else if (Server_Status == SERVER_STATUS_CODE_RUNNING_SIM_GR_RESET) {
@@ -957,17 +976,26 @@ void ProcessCommand(int ClientCount)
             } else {
                 sprintf(Clients[ClientCount].Response, "FL\n");
             }
-        }
-        else if(strcmp(Command,APP_COMMAND_STRING_GET_LOCATION)==0)
-        {
+        } else if (strcmp(Command, APP_COMMAND_STRING_GET_LOCATION) == 0) {
             sprintf(Clients[ClientCount].Response, "Count=%d,distance=%f\n", location, distance);
-        }
-        else if(strcmp(Command,APP_COMMAND_STRING_GET_CONNECTED_CLIENTS)==0)
-        {
-            sprintf(Clients[ClientCount].Response, "%d\n%s", connectedVR, ConnectedAddresses);
-        }
-        else if(strcmp(Command,APP_COMMAND_STRING_CALIBRATE_READING)==0)
-        {
+        } else if (strcmp(Command, APP_COMMAND_STRING_GET_SENSOR) == 0) {
+            int data = 0;
+            if (digitalRead(INPUTPIN1)) {
+                data |= 1;
+            }
+            if (digitalRead(INPUTPIN2)) {
+                data |= 2;
+            }
+            if (digitalRead(INPUTPIN3)) {
+                data |= 4;
+            }
+            if (digitalRead(INPUTPIN4)) {
+                data |= 8;
+            }
+            sprintf(Clients[ClientCount].Response, "Sensor=%d\n", data);
+        } else if (strcmp(Command, APP_COMMAND_STRING_GET_CONNECTED_CLIENTS) == 0) {
+            sprintf(Clients[ClientCount].Response, "Connected Client Count =%d\n%s", connectedVR, ConnectedAddresses);
+        } else if (strcmp(Command, APP_COMMAND_STRING_CALIBRATE_READING) == 0) {
             switch (Server_Status) {
                 case SERVER_STATUS_CODE_RUNNING_RUN_GR:
                     GoldRushTrackCount = location;
@@ -984,56 +1012,81 @@ void ProcessCommand(int ClientCount)
             }
             sprintf(Clients[ClientCount].Response, "Storing Track Count\n Salimghar %d,%f\nGoldRush %d,%f\n MITM %d,%f\n", SalimgharTrackCount, SalimGharTrackLength, GoldRushTrackCount, GoldRushTrackLength, MITMTrackCount, MITMTrackLength);
             StoreTrackCount();
-        }
-        else if(strcmp(Command,APP_COMMAND_STRING_LOAD_CALIBRATION)==0)
-        {
+        } else if (strcmp(Command, APP_COMMAND_STRING_LOAD_CALIBRATION) == 0) {
             LoadTrackCount();
             sprintf(Clients[ClientCount].Response, "Loaded Track Count\n Salimghar %d,%f\nGoldRush %d,%f\n MITM %d,%f\n", SalimgharTrackCount, SalimGharTrackLength, GoldRushTrackCount, GoldRushTrackLength, MITMTrackCount, MITMTrackLength);
-        }else if(strcmp(Command,APP_COMMAND_STRING_DISABLE_MEASUREMENT)==0)
-        {
-            if(Clients[ClientCount].DenyInput==0)
-            {
-                sprintf(Clients[ClientCount].Response,"Disabling Measurement\n");
-                Clients[ClientCount].DenyInput=1;
-            }else {
-                sprintf(Clients[ClientCount].Response,"Enabling Measurement\n");
-                Clients[ClientCount].DenyInput=0;
+        } else if (strcmp(Command, APP_COMMAND_STRING_DISABLE_MEASUREMENT) == 0) {
+            if (Clients[ClientCount].DenyInput == 0) {
+                sprintf(Clients[ClientCount].Response, "Disabling Measurement\n");
+                Clients[ClientCount].DenyInput = 1;
+            } else {
+                sprintf(Clients[ClientCount].Response, "Enabling Measurement\n");
+                Clients[ClientCount].DenyInput = 0;
             }
-        }else if(strcmp(Command,APP_COMMAND_STRING_STORE_BATTERY)==0)
-        {
+        } else if (strcmp(Command, APP_COMMAND_STRING_STORE_BATTERY) == 0) {
             if (i <= strlen(Clients[ClientCount].Command)) {
                 sscanf(Clients[ClientCount].Command + i, "%s", Parameters[0]);
-                sscanf(Parameters[0],"%f",&(Clients[ClientCount].Battery_Percentage));
+                sscanf(Parameters[0], "%f", &(Clients[ClientCount].Battery_Percentage));
                 i += strlen(Parameters[0]) + 1;
             }
-            sprintf(Clients[ClientCount].Response,"");
-        }else if(strcmp(Command,APP_COMMAND_STRING_STORE_TEMPERATURE)==0)
-        {
+            sprintf(Clients[ClientCount].Response, "");
+        } else if (strcmp(Command, APP_COMMAND_STRING_STORE_TEMPERATURE) == 0) {
             if (i <= strlen(Clients[ClientCount].Command)) {
                 sscanf(Clients[ClientCount].Command + i, "%s", Parameters[0]);
-                sscanf(Parameters[0],"%f",&(Clients[ClientCount].Temperature));
+                sscanf(Parameters[0], "%f", &(Clients[ClientCount].Temperature));
                 i += strlen(Parameters[0]) + 1;
             }
-            sprintf(Clients[ClientCount].Response,"");
-        }else if(strcmp(Command,APP_COMMAND_STRING_STORE_PROXIMITY)==0)
-        {
+            sprintf(Clients[ClientCount].Response, "");
+        } else if (strcmp(Command, APP_COMMAND_STRING_STORE_PROXIMITY) == 0) {
             if (i <= strlen(Clients[ClientCount].Command)) {
                 sscanf(Clients[ClientCount].Command + i, "%s", Parameters[0]);
-                sscanf(Parameters[0],"%d",&(Clients[ClientCount].Proximity));
+                sscanf(Parameters[0], "%d", &(Clients[ClientCount].Proximity));
                 i += strlen(Parameters[0]) + 1;
             }
-            sprintf(Clients[ClientCount].Response,"");
-        }else if(strcmp(Command,APP_COMMAND_STRING_STORE_STATUS)==0)
-        {
+            sprintf(Clients[ClientCount].Response, "");
+        } else if (strcmp(Command, APP_COMMAND_STRING_STORE_STATUS) == 0) {
             if (i <= strlen(Clients[ClientCount].Command)) {
                 sscanf(Clients[ClientCount].Command + i, "%s", Parameters[0]);
-                sscanf(Parameters[0],"%d",&(Clients[ClientCount].Status));
+                sscanf(Parameters[0], "%d", &(Clients[ClientCount].Status));
                 i += strlen(Parameters[0]) + 1;
             }
-            sprintf(Clients[ClientCount].Response,"");
+            sprintf(Clients[ClientCount].Response, "");
+        } else if (strcmp(Command, APP_COMMAND_STRING_STORE_NAME) == 0) {
+            if (i <= strlen(Clients[ClientCount].Command)) {
+                sscanf(Clients[ClientCount].Command + i, "%s", Parameters[0]);
+                sscanf(Parameters[0], "%s", Clients[ClientCount].Name);
+                i += strlen(Parameters[0]) + 1;
+            }
+            sprintf(Clients[ClientCount].Response, "");
+        }else if(strcmp(Command, APP_COMMAND_STRING_GET_LOG) == 0){
+            
+            if (i <= strlen(Clients[ClientCount].Command)) {
+                FILE *reader;
+                int nol, iterator;
+                char Path[20];
+                reader = fopen("log.txt", "r");
+                fscanf(reader, "%d\n", &nol);
+                fclose(reader);
+                nol--;
+                sscanf(Clients[ClientCount].Command + i, "%s", Parameters[0]);
+                sscanf(Parameters[0], "%d", &iterator);
+                i += strlen(Parameters[0]) + 1;
+                if (iterator > nol) {
+                    sprintf(Clients[ClientCount].Response, "Log only upto %d",nol);
+                } else {
+
+                    InputThreadProcessId = fork();
+                    if (InputThreadProcessId == 0) {
+                        sprintf(Path, "cat log/log%d.txt - | nc -l 1236", iterator);
+                        system(Path);
+                        exit(0);
+                    }
+                    sprintf(Clients[ClientCount].Response, "Log server created\n");
+                }
+            }
         }
-        Clients[ClientCount].Response+=strlen(Clients[ClientCount].Response);
+        Clients[ClientCount].Response += strlen(Clients[ClientCount].Response);
     }
-    Clients[ClientCount].Response=Clients[ClientCount].ResponseBuffer;
+    Clients[ClientCount].Response = Clients[ClientCount].ResponseBuffer;
 }
 
