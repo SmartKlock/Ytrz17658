@@ -9,11 +9,11 @@ CND_DISTDIR=dist
 # Debug configuration
 CND_PLATFORM_Debug=GNU-Linux
 CND_ARTIFACT_DIR_Debug=dist/Debug/GNU-Linux
-CND_ARTIFACT_NAME_Debug=libserverprogram.a
-CND_ARTIFACT_PATH_Debug=dist/Debug/GNU-Linux/libserverprogram.a
+CND_ARTIFACT_NAME_Debug=serverprogram
+CND_ARTIFACT_PATH_Debug=dist/Debug/GNU-Linux/serverprogram
 CND_PACKAGE_DIR_Debug=dist/Debug/GNU-Linux/package
-CND_PACKAGE_NAME_Debug=ServerProgram.tar
-CND_PACKAGE_PATH_Debug=dist/Debug/GNU-Linux/package/ServerProgram.tar
+CND_PACKAGE_NAME_Debug=serverprogram.tar
+CND_PACKAGE_PATH_Debug=dist/Debug/GNU-Linux/package/serverprogram.tar
 # Release configuration
 CND_PLATFORM_Release=GNU-Linux
 CND_ARTIFACT_DIR_Release=dist/Release/GNU-Linux

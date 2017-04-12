@@ -43,11 +43,11 @@ OBJECTFILES= \
 
 
 # C Compiler Flags
-CFLAGS=
+CFLAGS=-lwiringPi
 
 # CC Compiler Flags
-CCFLAGS=
-CXXFLAGS=
+CCFLAGS=-lwiringPi
+CXXFLAGS=-lwiringPi
 
 # Fortran Compiler Flags
 FFLAGS=
@@ -60,13 +60,11 @@ LDLIBSOPTIONS=
 
 # Build Targets
 .build-conf: ${BUILD_SUBPROJECTS}
-	"${MAKE}"  -f nbproject/Makefile-${CND_CONF}.mk ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/libserverprogram.a
+	"${MAKE}"  -f nbproject/Makefile-${CND_CONF}.mk ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/serverprogram
 
-${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/libserverprogram.a: ${OBJECTFILES}
+${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/serverprogram: ${OBJECTFILES}
 	${MKDIR} -p ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}
-	${RM} ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/libserverprogram.a
-	${AR} -rv ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/libserverprogram.a ${OBJECTFILES} 
-	$(RANLIB) ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/libserverprogram.a
+	${LINK.c} -o ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/serverprogram ${OBJECTFILES} ${LDLIBSOPTIONS}
 
 ${OBJECTDIR}/_ext/5c0/latestserversim.o: ../latestserversim.c 
 	${MKDIR} -p ${OBJECTDIR}/_ext/5c0
@@ -99,7 +97,7 @@ ${OBJECTDIR}/broadcastUDPtest.o: broadcastUDPtest.c
 # Clean Targets
 .clean-conf: ${CLEAN_SUBPROJECTS}
 	${RM} -r ${CND_BUILDDIR}/${CND_CONF}
-	${RM} ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/libserverprogram.a
+	${RM} ${CND_DISTDIR}/${CND_CONF}/${CND_PLATFORM}/serverprogram
 
 # Subprojects
 .clean-subprojects:
