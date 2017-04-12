@@ -67,14 +67,6 @@
       </compileType>
       <item path="../latestserversim.c" ex="false" tool="0" flavor2="0">
       </item>
-      <item path="../smoother.c" ex="false" tool="0" flavor2="0">
-      </item>
-      <item path="../socket_server.c" ex="false" tool="0" flavor2="0">
-      </item>
-      <item path="UDPClient.c" ex="false" tool="0" flavor2="0">
-      </item>
-      <item path="broadcastUDPtest.c" ex="false" tool="0" flavor2="0">
-      </item>
       <item path="wiringPi.h" ex="false" tool="3" flavor2="0">
       </item>
     </conf>
@@ -101,14 +93,6 @@
         </archiverTool>
       </compileType>
       <item path="../latestserversim.c" ex="false" tool="0" flavor2="0">
-      </item>
-      <item path="../smoother.c" ex="false" tool="0" flavor2="0">
-      </item>
-      <item path="../socket_server.c" ex="false" tool="0" flavor2="0">
-      </item>
-      <item path="UDPClient.c" ex="false" tool="0" flavor2="0">
-      </item>
-      <item path="broadcastUDPtest.c" ex="false" tool="0" flavor2="0">
       </item>
       <item path="wiringPi.h" ex="false" tool="3" flavor2="0">
       </item>

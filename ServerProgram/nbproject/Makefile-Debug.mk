@@ -35,11 +35,7 @@ OBJECTDIR=${CND_BUILDDIR}/${CND_CONF}/${CND_PLATFORM}
 
 # Object Files
 OBJECTFILES= \
-	${OBJECTDIR}/_ext/5c0/latestserversim.o \
-	${OBJECTDIR}/_ext/5c0/smoother.o \
-	${OBJECTDIR}/_ext/5c0/socket_server.o \
-	${OBJECTDIR}/UDPClient.o \
-	${OBJECTDIR}/broadcastUDPtest.o
+	${OBJECTDIR}/_ext/5c0/latestserversim.o
 
 
 # C Compiler Flags
@@ -70,26 +66,6 @@ ${OBJECTDIR}/_ext/5c0/latestserversim.o: ../latestserversim.c
 	${MKDIR} -p ${OBJECTDIR}/_ext/5c0
 	${RM} "$@.d"
 	$(COMPILE.c) -g -MMD -MP -MF "$@.d" -o ${OBJECTDIR}/_ext/5c0/latestserversim.o ../latestserversim.c
-
-${OBJECTDIR}/_ext/5c0/smoother.o: ../smoother.c 
-	${MKDIR} -p ${OBJECTDIR}/_ext/5c0
-	${RM} "$@.d"
-	$(COMPILE.c) -g -MMD -MP -MF "$@.d" -o ${OBJECTDIR}/_ext/5c0/smoother.o ../smoother.c
-
-${OBJECTDIR}/_ext/5c0/socket_server.o: ../socket_server.c 
-	${MKDIR} -p ${OBJECTDIR}/_ext/5c0
-	${RM} "$@.d"
-	$(COMPILE.c) -g -MMD -MP -MF "$@.d" -o ${OBJECTDIR}/_ext/5c0/socket_server.o ../socket_server.c
-
-${OBJECTDIR}/UDPClient.o: UDPClient.c 
-	${MKDIR} -p ${OBJECTDIR}
-	${RM} "$@.d"
-	$(COMPILE.c) -g -MMD -MP -MF "$@.d" -o ${OBJECTDIR}/UDPClient.o UDPClient.c
-
-${OBJECTDIR}/broadcastUDPtest.o: broadcastUDPtest.c 
-	${MKDIR} -p ${OBJECTDIR}
-	${RM} "$@.d"
-	$(COMPILE.c) -g -MMD -MP -MF "$@.d" -o ${OBJECTDIR}/broadcastUDPtest.o broadcastUDPtest.c
 
 # Subprojects
 .build-subprojects:
