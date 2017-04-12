@@ -22,7 +22,8 @@
 
 #include <unistd.h>
 #define DEBUG_MODE
-#define MAXCLIENTS  40
+#define MAXCLIENTS                  40
+#define WRITE_BLOCK_RETRY_COUNT     2
 
 #define INPUTPIN1   0
 #define INPUTPIN2   1
@@ -96,7 +97,8 @@
 #define APP_COMMAND_STRING_STORE_PROXIMITY            "PROXIMITY"
 #define APP_COMMAND_STRING_STORE_STATUS               "STATUS"
 #define APP_COMMAND_STRING_STORE_NAME                 "NAME"
-#define APP_COMMAND_STRING_GET_LOG                    "LOG"
+#define APP_COMMAND_STRING_GET_LOG                    "GETLOG"
+#define APP_COMMAND_STRING_GET_LOG_FILE_COUNT         "GETLOGCOUNT"
 
 struct ClientStatus {
     int IsConnected;
@@ -107,6 +109,7 @@ struct ClientStatus {
     float Temperature, Battery_Percentage;
     int Proximity, Status, WriteBlocked;
     char *Response, ResponseBuffer[2000], Command[200], Name[50];
+    long Previous_Check_Time;
 };
 
 int Server_Status = SERVER_STATUS_CODE_INIT;
@@ -336,6 +339,7 @@ int ReadSimValues(char *path, int *SimValues) {
 int main(int argc, char *argv[]) {
     char InputString[600];
     int iterator;
+    long Time_Delay_For_Select;
     delay(10000);
     Server_Status = SERVER_STATUS_CODE_RUNNING_SIM_SG_RESET;
 
@@ -635,7 +639,7 @@ int main(int argc, char *argv[]) {
         Timer_Variable.tv_usec = 40000;
         FD_ZERO(&ReadFileDiscriptors);
         FD_ZERO(&ExceptFileDiscriptors);
-        FD_ZERO(&ExceptFileDiscriptors);
+        FD_ZERO(&WriteFileDiscriptors);
         //        FD_SET(0, &ReadFileDiscriptors);
         FD_SET(ServerSocketFileDiscriptor, &ReadFileDiscriptors);
         FD_SET(ServerSocketFileDiscriptor, &ExceptFileDiscriptors);
@@ -658,8 +662,12 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
+        Time_Delay_For_Select=millis()+40;
         select(MaximumFileDiscriptorID + 1, &ReadFileDiscriptors, &WriteFileDiscriptors, &ExceptFileDiscriptors, &Timer_Variable);
-
+        if((Time_Delay_For_Select)>millis())
+        {
+            delay(Time_Delay_For_Select-millis());
+        }
         if (FD_ISSET(0, &ReadFileDiscriptors)) {
             char datac[60];
             scanf("%s", &datac);
@@ -703,6 +711,7 @@ int main(int argc, char *argv[]) {
             Clients[ClientCount].Proximity = 0;
             Clients[ClientCount].ResponseAvailable = 0;
             Clients[ClientCount].DenyInput = 0;
+            Clients[ClientCount].Previous_Check_Time=millis();
 
             if (Clients[ClientCount].ClientSocketFileDiscriptor < 0) {
                 printspecial(0, "ERROR on accept\n");
@@ -723,14 +732,13 @@ int main(int argc, char *argv[]) {
             if ((Clients[ClientCount].IsConnected != 1))
                 continue;
             if (FD_ISSET(Clients[ClientCount].ClientSocketFileDiscriptor, &ExceptFileDiscriptors)) {
-                printspecial(0, "Client Closed Connection on Client number %d\n", ClientCount);
+                printspecial(0, "Exception Connection closed, Client %d ip %d\n", ClientCount, Clients[ClientCount].ClientIP[3]);
                 close(Clients[ClientCount].ClientSocketFileDiscriptor);
                 Clients[ClientCount].IsConnected = 0;
                 ConnectedClients--;
                 continue;
             }
-            if (FD_ISSET(Clients[ClientCount].ClientSocketFileDiscriptor, &ReadFileDiscriptors)) {
-                int errorsoc = 0;
+            int errorsoc = 0;
                 socklen_t len = sizeof (errorsoc);
                 int retval = getsockopt(Clients[ClientCount].ClientSocketFileDiscriptor
                         , SOL_SOCKET
@@ -738,16 +746,18 @@ int main(int argc, char *argv[]) {
                         , &errorsoc
                         , &len);
                 if ((retval != 0) || (errorsoc != 0)) {
-                    printspecial(0, "Client Closed Connection on Client number %d\n", ClientCount);
+                    printspecial(0, "Read error Connection closed, Client %d ip %d\n", ClientCount, Clients[ClientCount].ClientIP[3]);
                     close(Clients[ClientCount].ClientSocketFileDiscriptor);
                     Clients[ClientCount].IsConnected = 0;
                     ConnectedClients--;
                     continue;
                 }
+            if (FD_ISSET(Clients[ClientCount].ClientSocketFileDiscriptor, &ReadFileDiscriptors)) {
+                
                 bzero(InputDataBuffer, 256);
                 TranssferCount = read(Clients[ClientCount].ClientSocketFileDiscriptor, InputDataBuffer, 255);
                 if (TranssferCount < 1) {
-                    printspecial(0, "Client Closed Connection on Client number %d\n", ClientCount);
+                    printspecial(0, "Read Number Connection closed, Client %d ip %d\n", ClientCount, Clients[ClientCount].ClientIP[3]);
                     close(Clients[ClientCount].ClientSocketFileDiscriptor);
                     Clients[ClientCount].IsConnected = 0;
                     ConnectedClients--;
@@ -766,13 +776,16 @@ int main(int argc, char *argv[]) {
                 if (Clients[ClientCount].DenyInput == 0) {
                     printspecial(0, "Message received from ip %d with client id %d : %s\n", Clients[ClientCount].ClientIP[3], ClientCount, InputDataBuffer);
                 }
+                Clients[ClientCount].Previous_Check_Time=millis();
 
             }
             if (!FD_ISSET(Clients[ClientCount].ClientSocketFileDiscriptor, &WriteFileDiscriptors)) {
-                if (Clients[ClientCount].WriteBlocked < 50) {
+                if (Clients[ClientCount].WriteBlocked < WRITE_BLOCK_RETRY_COUNT) {
                     Clients[ClientCount].WriteBlocked++;
+                    printspecial(0, "Write Blocked, Client %d ip %d\n", ClientCount, Clients[ClientCount].ClientIP[3]);
+                    continue;
                 } else {
-                    printspecial(0, "Client Closed Connection on Client number %d\n", ClientCount);
+                    printspecial(0, "Write Blocked Connection closed, Client %d ip %d\n", ClientCount, Clients[ClientCount].ClientIP[3]);
                     close(Clients[ClientCount].ClientSocketFileDiscriptor);
                     Clients[ClientCount].IsConnected = 0;
                     ConnectedClients--;
@@ -787,18 +800,27 @@ int main(int argc, char *argv[]) {
             time1 = micros();
             if (Clients[ClientCount].DenyInput == 0) {
                 sprintf(OutData, "%s", OutputDataBuffer);
+                Clients[ClientCount].Previous_Check_Time=millis();
             }
             if (Clients[ClientCount].ResponseAvailable) {
                 sprintf(OutData, "%s%s", OutData, Clients[ClientCount].Response);
                 Clients[ClientCount].ResponseAvailable = 0;
+                Clients[ClientCount].Previous_Check_Time=millis();
+            }
+            if((Clients[ClientCount].Previous_Check_Time+500)<millis()){
+                sprintf(OutData," \n");
+                Clients[ClientCount].Previous_Check_Time=millis();
             }
             TranssferCount = write(Clients[ClientCount].ClientSocketFileDiscriptor, OutData, strlen(OutData));
-            time2 = micros();
+            time2 = micros();/*
             if ((time2 - time1) > SIMULATION_DECIMATION_TIME) {
-                printspecial(1, "Data writing took too much time\n");
-            }
+                printspecial(1, "Data writing took too much time for client %d ip %d time\n", ClientCount, Clients[ClientCount].ClientIP[3],time2-time1);
+            }*/
             if ((TranssferCount < strlen(OutData))) {
-                printspecial(0, "Error writing to client %d\n", ClientCount);
+                printspecial(0, "Write Incomplete Connection closed, Client %d ip %d\n", ClientCount, Clients[ClientCount].ClientIP[3]);
+                close(Clients[ClientCount].ClientSocketFileDiscriptor);
+                Clients[ClientCount].IsConnected = 0;
+                ConnectedClients--;
             }
         }
         //        if (inputid == -2) {
@@ -1058,8 +1080,7 @@ void ProcessCommand(int ClientCount) {
                 i += strlen(Parameters[0]) + 1;
             }
             sprintf(Clients[ClientCount].Response, "");
-        }else if(strcmp(Command, APP_COMMAND_STRING_GET_LOG) == 0){
-            
+        } else if (strcmp(Command, APP_COMMAND_STRING_GET_LOG) == 0) {
             if (i <= strlen(Clients[ClientCount].Command)) {
                 FILE *reader;
                 int nol, iterator;
@@ -1072,21 +1093,29 @@ void ProcessCommand(int ClientCount) {
                 sscanf(Parameters[0], "%d", &iterator);
                 i += strlen(Parameters[0]) + 1;
                 if (iterator > nol) {
-                    sprintf(Clients[ClientCount].Response, "Log only upto %d",nol);
+                    sprintf(Clients[ClientCount].Response, "Log only upto %d", nol);
                 } else {
-
                     InputThreadProcessId = fork();
                     if (InputThreadProcessId == 0) {
-                        sprintf(Path, "cat log/log%d.txt - | nc -l 1236", iterator);
+                        sprintf(Path, "nc -l 1236<log/log%d.txt", iterator);
                         system(Path);
                         exit(0);
                     }
+                    delay(20);
                     sprintf(Clients[ClientCount].Response, "Log server created\n");
                 }
             }
+        }else if (strcmp(Command,APP_COMMAND_STRING_GET_LOG_FILE_COUNT)==0){
+            int lognumber=0;
+            if (stat("log.txt", &FileCheckStruct) == 0) {
+                FILE *Reader;
+                Reader = fopen("log.txt", "r");
+                fscanf(Reader, "%d\n", &lognumber);
+                fclose(Reader);    
+            }
+            sprintf(Clients[ClientCount].Response, "Log number %d\n",lognumber);
         }
         Clients[ClientCount].Response += strlen(Clients[ClientCount].Response);
     }
     Clients[ClientCount].Response = Clients[ClientCount].ResponseBuffer;
 }
-
